@@ -1,0 +1,8 @@
+# select silverblue-main as the base image
+FROM ghcr.io/ublue-os/silverblue-main
+
+# install wine on top
+RUN rpm-ostree install wine 
+
+# finalize the build
+RUN rm -rf /tmp/* /var/* && ostree container commit 
