@@ -1,36 +1,47 @@
 name: build-image
-on:
+on: # when the build should be run
   pull_request:
   schedule:
     - cron: '0 16 * * *' # 16:00 UTC everyday (30 min delay after 'nvidia' builds)
   push:
-  workflow_dispatch:
-env:
-    IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
+  workflow_dispatch: # allows you to manually trigger builds
+env: # these variables are the same on all matrix builds
+    IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }} # generates the registry-part of the OCI image URL
 
 jobs:
-  push-ghcr:
+  # this is where the action happens!
+  build-and-push:
     name: Build and push image
     runs-on: ubuntu-22.04
-    permissions:
-      contents: read
-      packages: write
-      id-token: write
+    permissions: # 
+      contents: read # required for reading the repo source code
+      packages: write # required for publishing packages
+      id-token: write # required for logging in to github
     strategy:
-      fail-fast: false
-      matrix:
+      fail-fast: false # stop GH from cancelling all matrix builds if one fails
+      matrix: # all combinations of these variables are built
+        # !!! This is the most important section
+        # Here you decide what to build. 
+        # For multi-image projects, it is common to only use one Containerfile
+        # and use matrix variables to pick between major versions and desktop editions.
+        # See https://github.com/ublue-os/main/blob/main/.github/workflows/build.yml#L21
+        # This example uses this approach, because the variables of a build
+        # are configurable in the Containerfile, and that is easier to grasp when starting out.
         containerfile: [Containerfile.myimage]
-
+        
     steps: 
-      # Checkout push-to-registry action GitHub repository
-      - name: Checkout Push to Registry action
+      # "Checks out" the repo, i.e. brings its contents to the build environment.
+      - name: Checkout repo
         uses: actions/checkout@v3
 
       - name: Gather environment variables
         # The `IMAGE_NAME` is generated from the name of the Containerfile, it is the part after the dot.
         run: echo "IMAGE_NAME=$(echo ${{ matrix.containerfile }} | cut -d . -f 2)" >> $GITHUB_ENV
 
-      # Build metadata
+      # Generate some metadata for the OCI image.
+      # This isn't strictly necessary, but index sites like artifacthub make use of these.
+      # See example https://artifacthub.io/packages/search?org=ublue-os&sort=relevance&page=1
+      # See list of labels in the OCI spec https://github.com/opencontainers/image-spec/blob/main/annotations.md
       - name: Image Metadata
         uses: docker/metadata-action@v4
         id: meta
@@ -41,22 +52,28 @@ jobs:
             org.opencontainers.image.title=${{ env.IMAGE_NAME }}
             org.opencontainers.image.description=${{ env.IMAGE_NAME }} is my custom OS image.
 
+      # Tags are used to select which version of an image to use.
+      # For example, using `silverblue-main:latest` would mean always using the latest version,
+      # and using `silverblue-main:39` would lock you to the 39-major version.
+      # This is where the tags to build your image are generated.
       - name: Generate tags
         id: generate-tags
         shell: bash
         run: |
           TAGS=()
-          TAGS+=("$(date +%Y%m%d)")
 
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-              TAGS+=("pr-${{ github.event.number }}")
+            # if this is a PR, add a pr number tag
+            TAGS+=("pr-${{ github.event.number }}")
           else
-              TAGS+=("latest")
+            # if this isn't a PR, add the latest tag and a timestamp tag
+            TAGS+=("$(date +%Y%m%d)")
+            TAGS+=("latest")
           fi
 
           echo "Publishing with the following tags: "
           echo "${TAGS[*]}"
-
+          
           echo "TAGS=${TAGS[*]}" >> $GITHUB_OUTPUT
 
       # Build image using Buildah action
@@ -64,14 +81,13 @@ jobs:
         id: build_image
         uses: redhat-actions/buildah-build@v2
         with:
-          containerfiles: "./${{ matrix.containerfile }}"
-          image: ${{ env.IMAGE_NAME }}
-          tags: |
-            ${{ steps.generate-tags.outputs.TAGS }}
-          labels: ${{ steps.meta.outputs.labels }}
-          oci: false
+          containerfiles: "./${{ matrix.containerfile }}" # select which containerfile to build
+          image: ${{ env.IMAGE_NAME }} # names the built image
+          tags: ${{ steps.generate-tags.outputs.TAGS }} # pulls in tags from previous step
+          labels: ${{ steps.meta.outputs.labels }} # pulls in labels from previous step
+          oci: false # don't use OCI metadata format instead of the Docker format (false by default)
 
-      # Workaround bug where capital letters in your GitHub username make it impossible to push to GHCR.
+      # Workaround for a bug where capital letters in your GitHub username make it impossible to push to GHCR.
       # https://github.com/macbre/push-to-ghcr/issues/12
       - name: Lowercase Registry
         id: registry_case
@@ -79,22 +95,19 @@ jobs:
         with:
           string: ${{ env.IMAGE_REGISTRY }}
 
-      # Push the image to GHCR (Image Registry)
+      # Push the image to GitHub Container Registry
       - name: Push To GHCR
         uses: redhat-actions/push-to-registry@v2
         id: push
-        if: github.event_name != 'pull_request'
-        env:
+        env: # set user and pass to use for logging in to GHCR
           REGISTRY_USER: ${{ github.actor }}
           REGISTRY_PASSWORD: ${{ github.token }}
         with:
-          image: ${{ steps.build_image.outputs.image }}
-          tags: ${{ steps.build_image.outputs.tags }}
-          registry: ${{ steps.registry_case.outputs.lowercase }}
+          image: ${{ steps.build_image.outputs.image }} # pulls in the newly built image from previous step
+          tags: ${{ steps.build_image.outputs.tags }} # pulls in tags from previous step
+          registry: ${{ steps.registry_case.outputs.lowercase }} # pulls in lowercased image registry string from previous step
           username: ${{ env.REGISTRY_USER }}
           password: ${{ env.REGISTRY_PASSWORD }}
-          extra-args: |
-            --disable-content-trust
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v2
@@ -113,6 +126,6 @@ jobs:
         run: |
           cosign sign -y --key env://COSIGN_PRIVATE_KEY ${{ steps.registry_case.outputs.lowercase }}/${{ env.IMAGE_NAME }}@${TAGS}
         env:
-          TAGS: ${{ steps.push.outputs.digest }}
+          TAGS: ${{ steps.push.outputs.digest }} # hash of the new image, to make sure we sign the right one
           COSIGN_EXPERIMENTAL: false
           COSIGN_PRIVATE_KEY: ${{ secrets.SIGNING_SECRET }}
