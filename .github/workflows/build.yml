@@ -4,6 +4,8 @@ on: # when the build should be run
   schedule:
     - cron: '0 16 * * *' # 16:00 UTC everyday (30 min delay after 'nvidia' builds)
   push:
+    branches:
+      - "main" # only build the main branch
   workflow_dispatch: # allows you to manually trigger builds
 env: # these variables are the same on all matrix builds
     IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }} # generates the registry-part of the OCI image URL
