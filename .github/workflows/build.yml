@@ -20,7 +20,7 @@ jobs:
       fail-fast: false
       matrix:
         containerfile: [Containerfile.myimage]
-        
+
     steps: 
       # Checkout push-to-registry action GitHub repository
       - name: Checkout Push to Registry action
@@ -56,7 +56,7 @@ jobs:
 
           echo "Publishing with the following tags: "
           echo "${TAGS[*]}"
-          
+
           echo "TAGS=${TAGS[*]}" >> $GITHUB_OUTPUT
 
       # Build image using Buildah action
@@ -64,7 +64,7 @@ jobs:
         id: build_image
         uses: redhat-actions/buildah-build@v2
         with:
-          containerfiles: "./containerfiles/${{ matrix.containerfile }}"
+          containerfiles: "./${{ matrix.containerfile }}"
           image: ${{ env.IMAGE_NAME }}
           tags: |
             ${{ steps.generate-tags.outputs.TAGS }}
