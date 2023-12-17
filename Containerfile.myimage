@@ -2,7 +2,7 @@
 FROM ghcr.io/ublue-os/silverblue-main
 
 # install wine on top
-RUN rpm-ostree install wine 
+RUN rpm-ostree install wine micro
 
 # finalize the build
 RUN rm -rf /tmp/* /var/* && ostree container commit 
