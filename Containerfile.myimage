@@ -1,6 +1,7 @@
 # select silverblue-main as the base image
 FROM ghcr.io/ublue-os/silverblue-main
 
+COPY --from=ghcr.io/ublue-os/bling:latest /files /tmp/bling/files
 COPY --from=ghcr.io/ublue-os/bling:latest /modules /tmp/modules/
 RUN bash /tmp/modules/default-flatpaks/default-flatpaks.sh '{"system": {"install": ["org.kde.kdenlive", "com.obsproject.Studio"]}}'
 
